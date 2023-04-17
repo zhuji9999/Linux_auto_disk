@@ -1,37 +1,56 @@
-bash
 #!/bin/bash
 
-# 检测是否有可用硬盘  
-AVAILABLE_DISKS=$(fdisk -l | awk '{print $2}' | grep -v 'Disk' | grep -v 'name' | grep -v '[0-9]*:')
-if [[ -z $AVAILABLE_DISKS ]]; then
-    echo "没有找到可用的硬盘。退出脚本......"
-    exit  
+# 检测是否有硬盘需要挂载
+disks=$(lsblk -nr | grep -v -e "boot" -e $(df -h | awk '{print $1}' | tail -n +2) | awk '{print $1}')
+if [ -z "$disks" ]; then
+  echo "没有可挂载的硬盘！"
+  exit 1
+else
+  echo "可挂载硬盘列表:"
+  echo "$disks"
 fi
 
-# 获取输入的挂载目录  
-read -p "请输入挂载目录: " MOUNT_POINT   
+# 提示用户输入挂载目录
+read -p "请输入挂载目录: " mountpoint
+if [ -z "$mountpoint" ]; then
+  echo "挂载目录不能为空！"
+  exit 1
+else
+  mkdir -p "$mountpoint"
+  echo "挂载目录为: $mountpoint"
+fi
 
-# 遍历可用硬盘
-for disk in $AVAILABLE_DISKS     
-do
-    echo "正在挂载 $disk 到 ${MOUNT_POINT}......"
-    mkdir -p ${MOUNT_POINT}
-    mount /dev/${disk} ${MOUNT_POINT}
-    echo "/dev/${disk} 已挂载到 ${MOUNT_POINT}。"  
-done                   
+# 挂载硬盘
+for disk in $disks; do
+  echo "正在挂载硬盘 $disk 到 $mountpoint/$disk ..."
+  mount "/dev/$disk" "$mountpoint/$disk"
+  if [ $? -eq 0 ]; then
+    echo "硬盘 $disk 挂载成功！"
+    # 将硬盘信息添加到 /etc/fstab 文件中
+    echo "/dev/$disk $mountpoint/$disk ext4 defaults 0 0" >> /etc/fstab
+    echo "硬盘 $disk 挂载信息添加到 /etc/fstab"
+  else
+    echo "硬盘 $disk 挂载失败！"
+    exit 1
+  fi
+done
 
-# 是否检测挂载成功
-read -p "是否检测挂载是否成功?[y/n] " TEST_MOUNT 
-if [[ $TEST_MOUNT == "n" ]]; then
-    echo "跳过挂载检测......" 
-elif [[ $TEST_MOUNT == "y" ]]; then
-    if mountpoint -q ${MOUNT_POINT}; then
-        echo "挂载成功。"
+# 检测是否成功挂载
+read -p "是否需要检测硬盘是否成功挂载？(y/n): " check
+if [ "$check" = "y" ]; then
+  for disk in $disks; do
+    if ! mountpoint -q "$mountpoint/$disk"; then
+      echo "硬盘 $disk 挂载失败！"
+      exit 1
     else
-        echo "挂载失败。"    
+      echo "硬盘 $disk 成功挂载到 $mountpoint/$disk"
     fi
+  done
+elif [ "$check" = "n" ]; then
+  echo "检测跳过，继续执行后面操作"
+else
+  echo "无效输入，检测跳过，继续执行后面操作"
 fi
 
-# 添加到fstab,开机自动挂载  
-echo "/dev/${disk}  ${MOUNT_POINT}  auto  defaults  0  0" >> /etc/fstab
-echo "已添加到fstab,开机将自动挂载。"
+# 其他操作
+echo "其他操作..."
